@@ -1,0 +1,121 @@
+% ==== PCANet Demo =======
+% T.-H. Chan, K. Jia, S. Gao, J. Lu, Z. Zeng, and Y. Ma, review zhongfei
+% "PCANet: A simple deep learning baseline for image classification?" submitted to IEEE TIP. 
+% ArXiv eprint: http://arxiv.org/abs/1404.3606 
+% Tsung-Han Chan [thchan@ieee.org]
+% Please email me if you find bugs, or have suggestions or questions!
+% ========================
+clear all;
+close all; 
+clc; 
+addpath('./Utils');
+addpath('./Liblinear');
+make;
+
+TrnSize = 10000; 
+ImgSize = 40; 
+
+%% Loading data 
+file_path_cells =  'data\Cell\';
+cells_path_list = dir(strcat(file_path_cells,'*.jpg'));
+cells_num = length(cells_path_list); 
+cells_data = [];
+if cells_num > 0 
+        for j = 1:cells_num   
+            cells_name = cells_path_list(j).name;
+            cells =  imread(strcat(file_path_cells,cells_name));
+            cells = rgb2gray(cells);
+            c = cells(:);
+            cells_data = [cells_data,c];
+        end  
+end 
+cells_Labels = [ones(cells_num,1)];
+
+file_path_NoneCells =  'data\NoneCell\';
+NoneCells_path_list = dir(strcat(file_path_NoneCells,'*.jpg'));
+NoneCells_num = length(NoneCells_path_list); 
+NoneCells_data = [];
+if NoneCells_num > 0 
+        for j = 1:NoneCells_num   
+            NoneCells_name = NoneCells_path_list(j).name;
+            NoneCells =  imread(strcat(file_path_NoneCells,NoneCells_name)); 
+            NoneCells = rgb2gray(NoneCells);
+            m = NoneCells(:);
+            NoneCells_data = [NoneCells_data,m];
+        end  
+end 
+NoneCells_Labels = [zeros(NoneCells_num,1)-1];
+
+sum_data = [cells_data,NoneCells_data];
+sum_labels = [cells_Labels;NoneCells_Labels];
+TrnData = sum_data(:,1:2:end);
+TestData = sum_data(:,2:2:end);
+TrnLabels = sum_labels(1:2:end);
+TestLabels =sum_labels(2:2:end);
+train_sample = size(TrnData,2);
+test_sample = size(TestData,2);
+ImgFormat = 'gray'; 
+TrnLabels = double(TrnLabels);
+TestLabels = double(TestLabels);
+%% For this demo, we subsample the Training and Testing sets 
+nTestImg = length(TestLabels);
+%% PCANet parameters (they should be funed based on validation set; i.e., ValData & ValLabel)
+PCANet.NumStages = 2;
+PCANet.PatchSize = [13 13];
+PCANet.NumFilters = [40 8];
+PCANet.HistBlockSize = [8 8];
+PCANet.BlkOverLapRatio = 0.5;
+PCANet.Pyramid = [4 2 1];
+fprintf('\n ====== PCANet Parameters ======= \n')
+PCANet
+%% PCANet Training with 10000 samples
+fprintf('\n ====== PCANet Training ======= \n')
+TrnData_ImgCell = mat2imgcell(double(TrnData),ImgSize,ImgSize,ImgFormat); % convert columns in TrnData to cells 
+tic; 
+[ftrain, V, BlkIdx] = PCANet_train(TrnData_ImgCell,PCANet,1); % BlkIdx serves the purpose of learning block-wise DR projection matrix; e.g., WPCA
+PCANet_TrnTime = toc;
+%% PCA hashing over histograms
+c = 10; 
+fprintf('\n ====== Training Linear SVM Classifier ======= \n')
+display(['now testing c = ' num2str(c) '...'])
+tic;
+models = train(TrnLabels, ftrain', ['-s 1 -c ' num2str(c) ' -q']); % we use linear SVM classifier (C = 10), calling liblinear library
+LinearSVM_TrnTime = toc;
+save('model\PCANet_model.mat','V','models','PCANet');
+%% PCANet Feature Extraction and Testing 
+TestData_ImgCell = mat2imgcell(TestData,ImgSize,ImgSize,ImgFormat); % convert columns in TestData to cells 
+% clear TestData; 
+fprintf('\n ====== PCANet Testing ======= \n')
+nCorrRecog = 0;
+RecHistory = zeros(nTestImg,1);
+x = 0;
+tic; 
+for idx = 1:1:nTestImg
+    ftest = PCANet_FeaExt(TestData_ImgCell(idx),V,PCANet); % extract a test feature using trained PCANet model 
+
+    [xLabel_est, accuracy, decision_values] = predict(TestLabels(idx),...
+        sparse(ftest'), models, '-q');   
+    if xLabel_est == TestLabels(idx)
+        RecHistory(idx) = 1;
+        nCorrRecog = nCorrRecog + 1; 
+    end    
+    if 0==mod(idx,nTestImg/100); 
+        fprintf('Accuracy up to %d tests is %.2f%%; taking %.2f secs per testing sample on average. \n',...
+            [idx 100*nCorrRecog/idx toc/idx]); 
+    end   
+    TestData_ImgCell{idx} = [];    
+end
+Averaged_TimeperTest = toc/nTestImg;
+Accuracy = nCorrRecog/nTestImg; 
+ErRate = 1 - Accuracy;
+%% Results display
+fprintf('\n ===== Results of PCANet, followed by a linear SVM classifier =====');
+fprintf('\n     trainning_samples_num: %d test_samples_num: %d .',train_sample,test_sample );
+fprintf('\n     PCANet training time: %.2f secs.', PCANet_TrnTime);
+fprintf('\n     Linear SVM training time: %.2f secs.', LinearSVM_TrnTime);
+fprintf('\n     Testing error rate: %.2f%', 100*ErRate);
+fprintf('\n     Testing accuracy rate: %.2f%', 100*Accuracy);
+fprintf('\n     Average testing time %.2f secs per test sample. \n\n',Averaged_TimeperTest);
+
+
+    
