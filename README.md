@@ -1,5 +1,5 @@
 # My-PCANet-Project
-  image-recognition
+  * image-recognition
 # platform
-  * matlab R2015a
-  * PCANet
+  **Matlab R2015a**
+  **PCANet**
